@@ -152,6 +152,7 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 		PGShmemHeader *seghdr;
 		Size		size = 0;
 		int			numSemas;
+		Size 		new_size;
 
 		/*
 		 * Size of the Postgres shared-memory block is estimated via
@@ -167,19 +168,22 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 	    for (i = 0; PgShmemComponentSizes[i].component_name; i++)
 		{
     		struct pg_component_shmem_size *shm_size = &PgShmemComponentSizes[i];
-			Size new_size = shm_size->size_func();
+			new_size = shm_size->size_func();
 			elog(DEBUG3, "SHMEM_ADD: %s - %zu", shm_size->component_name, new_size);
 			size = add_size(size, new_size);
 		}
 
 		/* freeze the addin request size and include it */
 		addin_request_allowed = false;
-		size = add_size(size, total_addin_request);
-		elog(DEBUG3, "SHMEM_ADD: %s - %zu", "total_addin_request", total_addin_request);
+
+		new_size = total_addin_request;
+		size = add_size(size, new_size);
+		elog(DEBUG3, "SHMEM_ADD: %s - %zu", "total_addin_request", new_size);
 
 		/* might as well round it off to a multiple of a typical page size */
-		elog(DEBUG3, "SHMEM_ADD: %s - %zu", "Rounding", BLCKSZ - (size % BLCKSZ));
-		size = add_size(size, BLCKSZ - (size % BLCKSZ));
+		new_size = BLCKSZ - (size % BLCKSZ);
+		elog(DEBUG3, "SHMEM_ADD: %s - %zu", "Rounding", new_size);
+		size = add_size(size, new_size);
 
 		elog(DEBUG3, "invoking IpcMemoryCreate(size=%zu)", size);
 
