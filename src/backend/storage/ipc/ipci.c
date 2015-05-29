@@ -70,6 +70,59 @@ RequestAddinShmemSpace(Size size)
 	total_addin_request = add_size(total_addin_request, size);
 }
 
+static Size InitialShmemSize()
+{
+	return (Size)100000;
+}
+
+static Size ShmemIndexSize()
+{
+	return (Size)hash_estimate_size(SHMEM_INDEX_SIZE, sizeof(ShmemIndexEnt));
+}
+
+struct pg_component_shmem_size {
+   char* component_name;
+   Size (*size_func)();
+};
+
+static struct pg_component_shmem_size PgShmemComponentSizes[] =
+{
+	{ "InitialShmemSize", InitialShmemSize },
+	{ "SpinlockSemaSize", SpinlockSemaSize },
+	{ "ShmemIndexSize", ShmemIndexSize },
+	{ "BufferShmemSize", BufferShmemSize },
+	{ "LockShmemSize", LockShmemSize },
+	{ "PredicateLockShmemSize", PredicateLockShmemSize },
+	{ "ProcGlobalShmemSize", ProcGlobalShmemSize },
+	{ "XLOGShmemSize", XLOGShmemSize },
+	{ "CLOGShmemSize", CLOGShmemSize },
+	{ "CommitTsShmemSize", CommitTsShmemSize },
+	{ "SUBTRANSShmemSize", SUBTRANSShmemSize },
+	{ "TwoPhaseShmemSize", TwoPhaseShmemSize },
+	{ "BackgroundWorkerShmemSize", BackgroundWorkerShmemSize },
+	{ "MultiXactShmemSize", MultiXactShmemSize },
+	{ "LWLockShmemSize", LWLockShmemSize },
+	{ "ProcArrayShmemSize", ProcArrayShmemSize },
+	{ "BackendStatusShmemSize", BackendStatusShmemSize },
+	{ "SInvalShmemSize", SInvalShmemSize },
+	{ "PMSignalShmemSize", PMSignalShmemSize },
+	{ "ProcSignalShmemSize", ProcSignalShmemSize },
+	{ "CheckpointerShmemSize", CheckpointerShmemSize },
+	{ "AutoVacuumShmemSize", AutoVacuumShmemSize },
+	{ "ReplicationSlotsShmemSize", ReplicationSlotsShmemSize },
+	{ "ReplicationOriginShmemSize", ReplicationOriginShmemSize },
+	{ "WalSndShmemSize", WalSndShmemSize },
+	{ "WalRcvShmemSize", WalRcvShmemSize },
+	{ "BTreeShmemSize", BTreeShmemSize },
+	{ "SyncScanShmemSize", SyncScanShmemSize },
+	{ "AsyncShmemSize", AsyncShmemSize },
+#ifdef EXEC_BACKEND
+	{ "ShmemBackendArraySize", ShmemBackendArraySize },
+#endif
+	{NULL, NULL}
+
+};
+
 
 /*
  * CreateSharedMemoryAndSemaphores
@@ -97,7 +150,7 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 	if (!IsUnderPostmaster)
 	{
 		PGShmemHeader *seghdr;
-		Size		size;
+		Size		size = 0;
 		int			numSemas;
 
 		/*
@@ -109,45 +162,23 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 		 * request doesn't overflow size_t.  If this gets through, we don't
 		 * need to be so careful during the actual allocation phase.
 		 */
-		size = 100000;
-		size = add_size(size, SpinlockSemaSize());
-		size = add_size(size, hash_estimate_size(SHMEM_INDEX_SIZE,
-												 sizeof(ShmemIndexEnt)));
-		size = add_size(size, BufferShmemSize());
-		size = add_size(size, LockShmemSize());
-		size = add_size(size, PredicateLockShmemSize());
-		size = add_size(size, ProcGlobalShmemSize());
-		size = add_size(size, XLOGShmemSize());
-		size = add_size(size, CLOGShmemSize());
-		size = add_size(size, CommitTsShmemSize());
-		size = add_size(size, SUBTRANSShmemSize());
-		size = add_size(size, TwoPhaseShmemSize());
-		size = add_size(size, BackgroundWorkerShmemSize());
-		size = add_size(size, MultiXactShmemSize());
-		size = add_size(size, LWLockShmemSize());
-		size = add_size(size, ProcArrayShmemSize());
-		size = add_size(size, BackendStatusShmemSize());
-		size = add_size(size, SInvalShmemSize());
-		size = add_size(size, PMSignalShmemSize());
-		size = add_size(size, ProcSignalShmemSize());
-		size = add_size(size, CheckpointerShmemSize());
-		size = add_size(size, AutoVacuumShmemSize());
-		size = add_size(size, ReplicationSlotsShmemSize());
-		size = add_size(size, ReplicationOriginShmemSize());
-		size = add_size(size, WalSndShmemSize());
-		size = add_size(size, WalRcvShmemSize());
-		size = add_size(size, BTreeShmemSize());
-		size = add_size(size, SyncScanShmemSize());
-		size = add_size(size, AsyncShmemSize());
-#ifdef EXEC_BACKEND
-		size = add_size(size, ShmemBackendArraySize());
-#endif
+
+		int i;
+	    for (i = 0; PgShmemComponentSizes[i].component_name; i++)
+		{
+    		struct pg_component_shmem_size *shm_size = &PgShmemComponentSizes[i];
+			Size new_size = shm_size->size_func();
+			elog(DEBUG3, "SHMEM_ADD: %s - %zu", shm_size->component_name, new_size);
+			size = add_size(size, new_size);
+		}
 
 		/* freeze the addin request size and include it */
 		addin_request_allowed = false;
 		size = add_size(size, total_addin_request);
+		elog(DEBUG3, "SHMEM_ADD: %s - %zu", "total_addin_request", total_addin_request);
 
 		/* might as well round it off to a multiple of a typical page size */
+		elog(DEBUG3, "SHMEM_ADD: %s - %zu", "Rounding", BLCKSZ - (size % BLCKSZ));
 		size = add_size(size, BLCKSZ - (size % BLCKSZ));
 
 		elog(DEBUG3, "invoking IpcMemoryCreate(size=%zu)", size);
